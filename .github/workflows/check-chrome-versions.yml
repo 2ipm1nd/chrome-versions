@@ -1,0 +1,48 @@
+name: "[cron] Check Chrome Versions"
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 * * * *"  # 每小時執行一次
+
+jobs:
+  check-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      cache-hit: ${{ steps.cache.outputs.cache-hit }}
+      version: ${{ steps.get-versions.outputs.version }}
+    env:
+      # 若你要查詢 Linux 版本，可修改 URL
+      CHROME_VERSION_URL: "https://cdn.jsdelivr.net/gh/berstend/chrome-versions/data/stable/all/version/latest.json"
+    steps:
+      - name: Get Chrome version info
+        id: get-versions
+        run: |
+          json=$(curl -s "${{ env.CHROME_VERSION_URL }}")
+          # 假設 JSON 中有 "version" 欄位
+          version=$(echo "$json" | jq -r '.version')
+          echo "Chrome version: ${version}"
+          # 產生 hash 用來判斷是否有版本更新
+          hash=$(echo -n "$json" | md5sum | cut -d' ' -f1)
+          echo "hash: ${hash}"
+          echo "::set-output name=hash::$hash"
+          echo "::set-output name=version::$version"
+        shell: bash
+
+      - name: Setup cache based on hash
+        id: cache
+        uses: actions/cache@v3
+        with:
+          path: ~/cache-chrome-version  # 此處只用作 cache key
+          key: chrome-${{ steps.get-versions.outputs.hash }}
+
+      - name: "Cache hit: Exit"
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: echo "cache hit, no new chrome versions"
+
+  trigger-notification:
+    if: needs.check-versions.outputs.cache-hit != 'true'
+    needs: check-versions
+    uses: ./.github/workflows/notify-chrome-version.yml
+    with:
+      version: ${{ needs.check-versions.outputs.version }}
